@@ -1,0 +1,63 @@
+C     TRI-TRAN 70V SHOWCASE 2: TERNARY FORTRAN-66 TOUR
+C     DEMONSTRATES 3-VALUED LOGICAL (T/U/F), LOGICAL IF STRICTNESS,
+C     1-INSTRUCTION ARITHMETIC IF (B3), BALANCED TERNARY Bw & HEPT Hw FORMAT,
+C     PASS-BY-REFERENCE SUBROUTINE, AND EXACT TF36 MATH FUNCTIONS.
+      PROGRAM TRTOUR
+      LOGICAL A, B, C1, C2, C3
+      INTEGER K, ICNT, NNEG, NZER, NPOS, VALS(5)
+      REAL R, S, E, BAD
+      DATA VALS /-42, 0, 42, -13, 13/
+      A = .TRUE.
+      B = .UNDECIDED.
+      C1 = A .AND. B
+      C2 = .FALSE. .OR. B
+      C3 = .NOT. B
+C     LOGICAL IF MUST IGNORE .UNDECIDED. (BOTH B AND .NOT. B!)
+      ICNT = 0
+      IF (B) ICNT = ICNT + 10
+      IF (.NOT. B) ICNT = ICNT + 20
+      IF (A) ICNT = ICNT + 1
+      WRITE (6, 100) C1, C2, C3, ICNT
+C     ONE-INSTRUCTION ARITHMETIC IF (B3) CLASSIFYING FIVE INTEGERS
+      NNEG = 0
+      NZER = 0
+      NPOS = 0
+      DO 40 K = 1, 5
+        IF (VALS(K)) 10, 20, 30
+   10   NNEG = NNEG + 1
+        GO TO 40
+   20   NZER = NZER + 1
+        GO TO 40
+   30   NPOS = NPOS + 1
+   40 CONTINUE
+      WRITE (6, 110) NNEG, NZER, NPOS
+C     BALANCED TERNARY (B8) AND UE HEPTAVINTIMAL (H6) FORMAT
+      K = 42
+      CALL NEGATE(K)
+      WRITE (6, 120) 42, 42, K, K
+C     EXACT TF36 TRANSCENDENTALS + REV 1.5 UNDECIDED (NaN) ARITHMETIC IF SAFETY!
+      R = SQRT(2.0)
+      S = SIN(0.5)
+      E = EXP(1.0)
+      BAD = SQRT(-1.0)
+      IF (BAD) 51, 52, 53
+   51 ICNT = -99
+      GO TO 54
+   52 ICNT = ICNT + 100
+      GO TO 54
+   53 ICNT = 99
+   54 WRITE (6, 130) R, S, E, ICNT
+  100 FORMAT (1X, 'KLEENE T&U=', L1, ' F|U=', L1, ' ~U=', L1,
+     +        ' ICNT=', I3)
+  110 FORMAT (1X, 'B3 COUNTS NEG=', I2, ' ZERO=', I2, ' POS=', I2)
+  120 FORMAT (1X, '42=B(', B6, ') H(', H3, ') -42=B(', B6, ') H(', H3,
+     +        ')')
+  130 FORMAT (1X, 'SQRT2=', F9.6, ' SIN.5=', F9.6, ' E=', F9.6,
+     +        ' NAN=', I4)
+      STOP 101
+      END
+      SUBROUTINE NEGATE(N)
+      INTEGER N
+      N = -N
+      RETURN
+      END

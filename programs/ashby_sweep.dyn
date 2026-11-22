@@ -1,0 +1,35 @@
+* ASHBY-BEER 2D POLICY BIFURCATION & ATTRACTOR-BASIN MAP (DYNAMO-X)
+* Sweeps Conservation (CONS) x Abatement (ABAT) across 6 coupled regions
+* (Tier 1 exact TF36 ODEs + Tier 2 T-Fabric TBFP-9 inter-regional coupling!)
+
+SPEC DT=2.0, LENGTH=2070.0, TSTART=1970.0, PRTPER=50.0, METHOD=EULER, REGIONS=6
+
+C CONS = 0.50
+C ABAT = 0.50
+
+N POP = 1.00
+N RES = 1.35
+N POL = 0.20
+
+A REFF.K = RES.K / (RES.K + 0.35)
+A OUTP.K = POP.K * REFF.K
+A PSTR.K = POL.K / (1.0 + POL.K)
+
+R DPOP.KL = POP.K * (0.048 * REFF.K * (1.0 - POP.K / 2.5) - 0.008 - 0.035 * PSTR.K)
+R DRES.KL = -0.032 * (1.0 - 0.82 * CONS) * OUTP.K + 0.014 * CONS * (1.25 - RES.K)
+R DPOL.KL = 0.070 * (1.0 - 0.85 * ABAT) * OUTP.K - 0.095 * POL.K
+
+L POP.K = POP.J + DT * DPOP.JK
+L RES.K = RES.J + DT * DRES.JK
+L POL.K = POL.J + DT * DPOL.JK
+
+* Inter-regional trade & resource sharing dispatched to 27-tile T-Fabric (TBFP-9)!
+COUPLE POP = 0.02
+COUPLE RES = 0.04
+
+* Ashby Essential Variable Corridors -> Native Kleene +1 / 0 / -1 Map
+ASHBY POP IN [0.70, 3.00]
+ASHBY RES IN [0.40, 2.50]
+ASHBY POL IN [0.00, 1.20]
+
+SWEEP CONS = 0.10..0.90 STEP 0.20, ABAT = 0.10..0.90 STEP 0.20

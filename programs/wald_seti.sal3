@@ -1,0 +1,54 @@
+-- SAL-3 Showcase 1: Good-Wald Sequential Deciban SETI Detector
+-- Demonstrates DECIBAN fixed-point arithmetic (81 ticks/dB), hardware DWALD,
+-- hardware 243-entry ROM DLSE, and native three-way `sign ... of` (B3).
+
+bloop
+
+const THRESH : DECIBAN = 20.0db
+
+global beacon_frames : DECIBAN[5] := [6.5db, 5.0db, 7.5db, 4.0db, 6.0db]
+global noise_frames  : DECIBAN[5] := [-6.0db, -5.5db, -4.5db, -5.0db, -6.0db]
+global faint_frames  : DECIBAN[5] := [3.0db, -1.5db, 2.5db, -1.0db, 4.0db]
+
+proc test_stream(stream : ADDR, count : INT) -> TRIT
+begin
+  var ev : DECIBAN := 0.0db
+  var i : INT := 0
+  for i := 0 to count - 1 do
+  begin
+    var sample : DECIBAN := 0.0db
+    -- Read raw DB36 tick word via peek() -> accumulate with saturating DADD
+    -- (Direct indexed global arrays are typed; here we demonstrate ADDR loop)
+    if stream = @beacon_frames then sample := beacon_frames[i]
+    else if stream = @noise_frames then sample := noise_frames[i]
+    else sample := faint_frames[i]
+
+    ev +:= sample
+    sign wald(ev, THRESH) of
+      false     : return false
+      undecided : next
+      true      : return true
+    end
+  end
+  return undecided
+end
+
+proc main() -> INT
+begin
+  var v_beacon : TRIT := test_stream(@beacon_frames, 5)
+  var v_noise  : TRIT := test_stream(@noise_frames, 5)
+  var v_faint  : TRIT := test_stream(@faint_frames, 5)
+
+  -- Verify hardware DLSE: log-sum-exp(10 dB, 10 dB) = 13.01 dB
+  var combined : DECIBAN := lse(10.0db, 10.0db)
+
+  print_trit(v_beacon)
+  print_trit(v_noise)
+  print_trit(v_faint)
+  print_db(combined)
+
+  -- Return +1 if all three Wald verdicts match (+1, -1, 0)
+  if (v_beacon = true) and (v_noise = false) and (v_faint = undecided) then
+    return 1
+  return -1
+end

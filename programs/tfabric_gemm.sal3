@@ -1,0 +1,44 @@
+-- SAL-3 Showcase 3: 27-Tile T-Fabric TBFP-9 GEMM Dispatch from SAL-3
+-- Packs 6x6 TBFP-9 matrices (4 nonets per T36 word, E_blk=8 -> scale=1.0),
+-- dispatches via `tfabric_gemm` (compiling to 9-word TTD + TEXEC A6, S0 + TWAIT S0, #0),
+-- and verifies exact C = (2*I) * B = 2*B on the simulated UE-1000!
+
+bloop
+
+global mat_a : INT[9]    -- 36 nonets packed 4 per T36 word
+global mat_b : INT[9]
+global mat_c : INT[9]
+
+proc pack4(n3 : INT, n2 : INT, n1 : INT, n0 : INT) -> INT
+  = (n3 << 27) + (n2 << 18) + (n1 << 9) + n0
+
+proc main() -> INT
+begin
+  -- Build A = 2 * I_6 (diagonal entries = 2 at flat indices 0, 7, 14, 21, 28, 35)
+  mat_a[0] := pack4(2, 0, 0, 0)
+  mat_a[1] := pack4(0, 0, 0, 2)
+  mat_a[2] := pack4(0, 0, 0, 0)
+  mat_a[3] := pack4(0, 0, 2, 0)
+  mat_a[4] := pack4(0, 0, 0, 0)
+  mat_a[5] := pack4(0, 2, 0, 0)
+  mat_a[6] := pack4(0, 0, 0, 0)
+  mat_a[7] := pack4(2, 0, 0, 0)
+  mat_a[8] := pack4(0, 0, 0, 2)
+
+  -- Build B with every element = 5
+  var i : INT := 0
+  for i := 0 to 8 do
+    mat_b[i] := pack4(5, 5, 5, 5)
+
+  -- Dispatch across all 27 active tiles (Rev. 1.5 S0 shorthand!)
+  var status : TRIT := tfabric_gemm(@mat_a, @mat_b, @mat_c, 6, 6, 6, 8, 8, 8)
+  print_trit(status)
+
+  -- Unpack first nonet of C (xtr trits 27..35 -> should be 2 * 5 = 10!)
+  var c00 : INT := xtr(mat_c[0], 27, 9)
+  var c55 : INT := xtr(mat_c[8], 0, 9)
+  print_int(c00)
+  print_int(c55)
+
+  return c00 + c55   -- 10 + 10 = 20
+end

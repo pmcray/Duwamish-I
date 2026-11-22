@@ -1,0 +1,64 @@
+* FORRESTER WORLD2 / OBB CLIODYNAMICS POLICY MODEL (DYNAMO-X)
+* Compiled natively to TRIAD-36 TF36 (47.55-bit mantissa, unbiased rounding)
+* with 3rd-order Forrester pollution lag (DELAY3), TABHL nonlinear multipliers,
+* Ashby essential-variable corridors, and three RERUN policy regimes!
+
+SPEC DT=1.0, LENGTH=2090.0, TSTART=1970.0, PRTPER=20.0, PLTPER=8.0, METHOD=RK2
+
+* Policy Control Parameters (patched in-place by RERUNs — zero recompile!)
+C CONS = 0.05
+C ABAT = 0.05
+
+* Nonlinear Forrester Lookup Tables
+* Resource extraction efficiency vs remaining stock R in [0.0 .. 1.5]
+T TRES = 0.02 / 0.32 / 0.65 / 0.85 / 0.94 / 0.98 / 1.00
+* Pollution mortality multiplier vs persistent pollution Z in [0.0 .. 6.0]
+T TPOL = 1.00 / 1.15 / 1.45 / 2.10 / 3.20 / 4.80 / 6.50
+
+* State Levels (Stocks) & Initial Conditions (1970 baseline)
+N POP = 1.00
+N CAP = 1.00
+N RES = 1.40
+N POL = 0.20
+N LEG = 0.85
+
+* Auxiliaries (topologically sorted by DYNAMO-X compiler)
+A REFF.K  = TABHL(TRES, RES.K, 0.0, 1.5, 0.25)
+A PMULT.K = TABHL(TPOL, POL.K, 0.0, 6.0, 1.0)
+A OUTP.K  = CAP.K * REFF.K * (0.40 + 0.60 * LEG.K)
+A PSTR.K  = POL.K / (1.0 + POL.K)
+A PDEL.K  = DELAY3(0.065 * (1.0 - 0.85 * ABAT) * OUTP.K, 6.0)
+
+* Flow Rates
+R BIRTH.KL = POP.K * 0.058 * REFF.K * LEG.K * MAX(0.0, 1.0 - POP.K / 2.8)
+R DEATH.KL = POP.K * (0.011 * PMULT.K)
+R INVST.KL = 0.14 * (1.0 - 0.35 * CONS) * OUTP.K
+R DEPRC.KL = 0.055 * CAP.K
+R DEPLT.KL = 0.028 * (1.0 - 0.80 * CONS) * OUTP.K
+R RECYC.KL = 0.016 * CONS * MAX(0.0, 1.30 - RES.K)
+R PABSR.KL = 0.095 * POL.K
+R LRECV.KL = 0.08 * (REFF.K - 0.35) * (1.0 - LEG.K)
+R LEROD.KL = 0.065 * PSTR.K * LEG.K
+
+* Level Integration Equations (compiled to exact TF36 RK2 midpoint steps!)
+L POP.K = POP.J + DT * (BIRTH.JK - DEATH.JK)
+L CAP.K = CAP.J + DT * (INVST.JK - DEPRC.JK)
+L RES.K = RES.J + DT * (RECYC.JK - DEPLT.JK)
+L POL.K = POL.J + DT * (PDEL.K - PABSR.JK)
+L LEG.K = LEG.J + DT * (LRECV.JK - LEROD.JK)
+
+* Ashby Essential Variable Viability Corridors
+ASHBY POP IN [0.65, 3.50]
+ASHBY RES IN [0.35, 3.00]
+ASHBY LEG IN [0.45, 1.05]
+
+PRINT POP, CAP, RES, POL, LEG
+PLOT  POP=P, RES=R, POL=Z, LEG=L
+
+RERUN PARTIAL TRANSITION (METASTABLE FRONTIER)
+C CONS = 0.55
+C ABAT = 0.50
+
+RERUN ASHBY-BEER ULTRASTABLE POLICY CORRIDOR
+C CONS = 0.85
+C ABAT = 0.85

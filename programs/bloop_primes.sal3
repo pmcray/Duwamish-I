@@ -1,0 +1,43 @@
+-- SAL-3 Showcase 4: Hofstadter BlooP-Certified Primes, Kleene Logic & Unbiased Shifts
+-- Statically certified by SAL-3 to terminate (no `while`, no recursion).
+
+bloop
+
+proc is_prime(n : INT) -> TRIT
+begin
+  if n < 2 then return false
+  var d : INT := 2
+  for d := 2 to n - 1 do
+  begin
+    if d * d > n then break
+    if (n mod d) = 0 then return false
+  end
+  return true
+end
+
+proc main() -> INT
+begin
+  -- Count primes up to 50 (there are 15 primes: 2..47)
+  var count : INT := 0
+  var n : INT := 2
+  for n := 2 to 50 do
+    if is_prime(n) then count +:= 1
+
+  -- Demonstrate unbiased balanced-ternary rounding shift: 5 >> 1 == 2, 4 >> 1 == 1
+  var r1 : INT := 5 >> 1
+  var r2 : INT := 4 >> 1
+
+  -- Demonstrate Kleene three-valued logic: true & undecided == undecided, false | undecided == undecided
+  var k1 : TRIT := true & undecided
+  var k2 : TRIT := false | undecided
+  var k3 : TRIT := eqv(false, false)
+
+  print_int(count)
+  print_int(r1)
+  print_int(r2)
+  print_trit(k1)
+  print_trit(k2)
+  print_trit(k3)
+
+  return count * 100 + r1 * 10 + r2   -- 1521
+end

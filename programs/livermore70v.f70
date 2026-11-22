@@ -1,0 +1,40 @@
+C     TRI-TRAN 70V SHOWCASE 1: LIVERMORE KERNELS 1 & 3 (SCALAR VS 70V VECTOR)
+C     COMPARES SCALAR DO LOOP AGAINST C-COMPLEX VL<=27 STRIP-MINED VECTOR OPS
+C     OVER N = 54 ELEMENTS (2 HARDWARE VECTOR CHUNKS OF 27).
+      PROGRAM LIV70V
+      REAL X(54), Y(54), Z(54), Q(54), U(54)
+      INTEGER I, N, T0, T1, T2, T3, CYCSC, CYCVEC
+      REAL SSCA, SVEC, ERR
+      N = 54
+      DO 10 I = 1, N
+        X(I) = FLOAT(I) * 0.25
+        Y(I) = 1.5 + FLOAT(I) * 0.1
+        Z(I) = 0.5
+        Q(I) = 0.5
+   10 CONTINUE
+C     --- KERNEL 3 (INNER PRODUCT): SCALAR DO LOOP ---
+      T0 = ICLOCK()
+      SSCA = 0.0
+      DO 20 I = 1, N
+        SSCA = SSCA + X(I) * Y(I)
+   20 CONTINUE
+      T1 = ICLOCK()
+      CYCSC = T1 - T0
+C     --- KERNEL 3 (INNER PRODUCT): 70V HARDWARE VDOT (VLD+VMUL+VRED) ---
+      T2 = ICLOCK()
+      SVEC = VDOT(X, Y, N)
+      T3 = ICLOCK()
+      CYCVEC = T3 - T2
+C     --- KERNEL 1 (HYDRO FRAGMENT): 70V VECTOR FMA Z(1:N) = Z + X*Y ---
+      Z(1:N) = FMA(X(1:N), Y(1:N))
+      U(1:N) = X(1:N) + Y(1:N)
+      ERR = ABS(SSCA - SVEC)
+      WRITE (6, 100) SSCA, SVEC, ERR
+      WRITE (6, 110) CYCSC, CYCVEC
+      WRITE (6, 120) VSUM(Z, 27), U(54)
+  100 FORMAT (1X, 'DOT SCALAR=', F10.4, ' VDOT=', F10.4, ' ERR=', E10.3)
+  110 FORMAT (1X, 'CYCLES SCALAR=', I6, ' VECTOR=', I6)
+  120 FORMAT (1X, 'HYDRO VSUM(27)=', F10.4, ' U(54)=', F8.3)
+      IF (ERR .LT. 1.0E-10) STOP 1
+      STOP 99
+      END

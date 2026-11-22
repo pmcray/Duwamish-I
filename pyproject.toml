@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "duwamish-ue1000"
+version = "1.5.0"
+description = "Cycle-approximate balanced-ternary simulator, TRIAD-36 assembler, 9-language software stack, and reference workloads for the Duwamish-I (UE-1000) system"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+ue1000 = "ue1000.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["ue1000*", "workloads*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"

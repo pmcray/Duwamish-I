@@ -1,0 +1,28 @@
+-- CONVERSE Showcase 1: OBB Unseen Level -9 Full Researcher Terminal Session
+-- Exercises all four Duwamish-I tiers from a Pask/Licklider vector-CRT console:
+--   1. Jameson Alexandrian Vault TB1 Pure-Trit Associative Search (T-Fabric Mode +3)
+--   2. Mini-SAEW TBFP-9 Training + 1-Tile TBFP-9 & TBFP-3 Interactive Dialogue
+--   3. Forrester-Ashby Exact TF36 Cliodynamics Interactive Policy Steering
+--   4. Beer VSM Algedonic Telemetry & Live < 75 us Ashby Hot-Spare Cutover Drill
+
+PRINT "=== OBB LEVEL -9 RESEARCHER CONSOLE · DUWAMISH-I (UE-1000) ==="
+
+-- 1. Pure-trit TB1 associative catalogue search (Rosenblatt-Kelvanov ECO-71-09)
+FIND "Setun Kelvanov Byurakan ternary associative" TOP 3
+FIND "Forrester World3 collapse dynamics" TOP 2
+
+-- 2. Train & converse with Mini-SAEW directly on the T-Fabric
+TRAIN SAEW STEPS 70
+ASK SAEW "CAT-001 " MODE TBFP9
+ASK SAEW "CAT-001 " MODE TBFP3
+
+-- 3. Interactive Forrester-Ashby Cliodynamics Policy Steering (Exact TF36 + TBFP-9)
+STEER CLIO CONSERVATION 0.05 ABATEMENT 0.05 YEARS 150
+SIGN CLIO_POLICY_VIABLE OF FALSE: PRINT "  [POLICY ALERT] Trajectory collapses; adjusting levers..." | UNDECIDED: PRINT "  [POLICY] Metastable" | TRUE: PRINT "  [POLICY] Viable"
+
+STEER CLIO CONSERVATION 0.85 ABATEMENT 0.85 YEARS 150
+SIGN CLIO_POLICY_VIABLE OF FALSE: PRINT "  [POLICY] Collapse" | UNDECIDED: PRINT "  [POLICY] Metastable" | TRUE: PRINT "  [POLICY CONFIRMED] Ashby-Beer Ultrastable Equilibrium reached!"
+
+-- 4. Beer VSM Algedonic Bus & Live Hot-Spare Cutover Drill
+FAULT TILE 8 REASON "LEVEL-9_ACCEPTANCE_DRILL"
+STATUS VSM

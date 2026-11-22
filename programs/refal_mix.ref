@@ -1,0 +1,130 @@
+* === FUTAMURA'S FIRST PROJECTION (1971) — MIXED COMPUTATION IN REFAL-36 ===
+* Specializes a flowchart interpreter (`Run`) with respect to static inputs
+* (Ershov's "mixed computation" / Turchin's metasystem transition), unrolling
+* `Power(X, 5)` into straight-line residual code with ZERO loop overhead!
+
+$ENTRY Go {
+  = <Prout '=== FUTAMURA 1971: MIXED COMPUTATION (PARTIAL EVALUATION) ==='>
+    <Prout '1. Interpreting Power(X=3, N=5) directly:'>
+    <RunTimed 'Interpreted' <PowerProg> ((X 3) (N 5))>
+    <Prout '2. Specializing Power(X, N=5) via <Mix> -> Residual Program:'>
+    <RunSpecialize <PowerProg>>;
+}
+
+RunSpecialize {
+  (e.Blocks), <Mix (e.Blocks) Init ((N 5))> : (e.Residual)
+    = <Prout 'Residual code: ' (e.Residual)>
+      <Prout '3. Running compiled residual Power_5(X=3):'>
+      <RunTimed 'Compiled   ' (e.Residual) ((X 3))>;
+}
+
+RunTimed {
+  e.Label (e.Prog) (e.Env), <Step> : s.T0, <Run (e.Prog) (e.Env)> : e.Val, <Step> : s.T1
+    = <Prout e.Label ' -> Result = ' e.Val ' | Refal steps = ' <Sub s.T1 s.T0>>;
+}
+
+* Flowchart program for Power(X, N): computes X^N
+PowerProg {
+  = (
+      (Init ((Set P 1)) (Goto Test))
+      (Test () (IfZero N Done Loop))
+      (Loop ((Set P (Mul P X)) (Set N (Sub N 1))) (Goto Test))
+      (Done () (Return P))
+    );
+}
+
+* --- Standard Flowchart Interpreter `Run` ---
+Run {
+  ((s.Start e.First) e.Rest) (e.Env)
+    = <ExecBlock ((s.Start e.First) e.Rest) s.Start (e.Env)>;
+}
+
+ExecBlock {
+  (e.Prog) s.Lbl (e.Env), <LookupBlock (e.Prog) s.Lbl> : (e.Stmts) (e.Term)
+    = <ExecTerm (e.Prog) <ExecStmts (e.Stmts) (e.Env)> (e.Term)>;
+}
+
+LookupBlock {
+  (e.1 (s.Lbl (e.Stmts) (e.Term)) e.2) s.Lbl = (e.Stmts) (e.Term);
+}
+
+ExecStmts {
+  () (e.Env) = (e.Env);
+  ((Set s.V e.Expr) e.Rest) (e.Env)
+    = <ExecStmts (e.Rest) <Bind s.V <EvalExpr (e.Env) e.Expr> (e.Env)>>;
+}
+
+ExecTerm {
+  (e.Prog) (e.Env) (Goto s.Lbl) = <ExecBlock (e.Prog) s.Lbl (e.Env)>;
+  (e.Prog) (e.Env) (Return e.Expr) = <EvalExpr (e.Env) e.Expr>;
+  (e.Prog) (e.Env) (IfZero s.V s.Then s.Else), <LookupEnv s.V (e.Env)> : {
+    0 = <ExecBlock (e.Prog) s.Then (e.Env)>;
+    s.Other = <ExecBlock (e.Prog) s.Else (e.Env)>;
+  };
+}
+
+EvalExpr {
+  (e.Env) s.N, <Type s.N> : 'N' s.N = s.N;
+  (e.Env) s.V = <LookupEnv s.V (e.Env)>;
+  (e.Env) (Mul t.A t.B) = <Mul <EvalExpr (e.Env) t.A> <EvalExpr (e.Env) t.B>>;
+  (e.Env) (Sub t.A t.B) = <Sub <EvalExpr (e.Env) t.A> <EvalExpr (e.Env) t.B>>;
+  (e.Env) (Add t.A t.B) = <Add <EvalExpr (e.Env) t.A> <EvalExpr (e.Env) t.B>>;
+}
+
+LookupEnv {
+  s.V (e.1 (s.V s.Val) e.2) = s.Val;
+}
+
+Bind {
+  s.V s.Val (e.1 (s.V s.Old) e.2) = (e.1 (s.V s.Val) e.2);
+  s.V s.Val (e.Env) = (e.Env (s.V s.Val));
+}
+
+* --- Partial Evaluator / Mixed Computation Specializer `Mix` ---
+* Drives static variables (N) away at compile time, emitting pure straight-line
+* residual instructions for dynamic variables (X, P)!
+Mix {
+  (e.Prog) s.Start (e.StaticEnv), <Drive (e.Prog) s.Start (e.StaticEnv) ()> : (e.Stmts) (e.Term)
+    = ((B1 (e.Stmts) (e.Term)));
+}
+
+Drive {
+  (e.Prog) s.Lbl (e.SEnv) (e.Acc), <LookupBlock (e.Prog) s.Lbl> : (e.Stmts) (e.Term)
+    = <DriveStmts (e.Prog) (e.Stmts) (e.Term) (e.SEnv) (e.Acc)>;
+}
+
+DriveStmts {
+  (e.Prog) () (Goto s.Next) (e.SEnv) (e.Acc)
+    = <Drive (e.Prog) s.Next (e.SEnv) (e.Acc)>;
+  (e.Prog) () (Return e.Expr) (e.SEnv) (e.Acc)
+    = (e.Acc) (Return <ReduceExpr (e.SEnv) e.Expr>);
+  (e.Prog) () (IfZero s.V s.Then s.Else) (e.SEnv) (e.Acc), <LookupStatic s.V (e.SEnv)> : {
+    (Found 0) = <Drive (e.Prog) s.Then (e.SEnv) (e.Acc)>;
+    (Found s.NZ) = <Drive (e.Prog) s.Else (e.SEnv) (e.Acc)>;
+  };
+  (e.Prog) ((Set s.V e.Expr) e.Rest) (e.Term) (e.SEnv) (e.Acc), <IsStatic s.V (e.SEnv)> : {
+    Yes = <DriveStmts (e.Prog) (e.Rest) (e.Term)
+            <Bind s.V <EvalExpr (e.SEnv) e.Expr> (e.SEnv)> (e.Acc)>;
+    No  = <DriveStmts (e.Prog) (e.Rest) (e.Term)
+            (e.SEnv) (e.Acc (Set s.V <ReduceExpr (e.SEnv) e.Expr>))>;
+  };
+}
+
+IsStatic {
+  s.V (e.1 (s.V s.Val) e.2) = Yes;
+  s.V (e.Env) = No;
+}
+
+LookupStatic {
+  s.V (e.1 (s.V s.Val) e.2) = (Found s.Val);
+  s.V (e.Env) = Dynamic;
+}
+
+ReduceExpr {
+  (e.SEnv) s.N, <Type s.N> : 'N' s.N = s.N;
+  (e.SEnv) s.V, <LookupStatic s.V (e.SEnv)> : {
+    (Found s.Val) = s.Val;
+    Dynamic = s.V;
+  };
+  (e.SEnv) (s.Op t.A t.B) = (s.Op <ReduceExpr (e.SEnv) t.A> <ReduceExpr (e.SEnv) t.B>);
+}

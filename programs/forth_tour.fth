@@ -1,0 +1,53 @@
+\ === FORTH-3 LANGUAGE TOUR ON DUWAMISH-I (UE-1000) ===
+\ Native TRIAD-36 indirect-threaded Forth (FORTH-79 / BBC FORTH compatible)
+
+." === 1. BALANCED-TERNARY STACK ARITHMETIC & SHIFTS ===" CR
+." 3t1T01 = " 3t1T01 DUP . ." | 3* = " DUP 3* . ." | 3/ = " 3/ . CR
+." 1973 in Heptavintimal (.H) & Trits (.T): " 1973 DUP .H .T CR
+
+." === 2. RECURSION (FIBONACCI) & DO..LOOP SQUARES ===" CR
+: FIB ( n -- fib[n] )
+  DUP 2 < IF EXIT THEN
+  DUP 1- RECURSE SWAP 2 - RECURSE + ;
+
+: PRINT-FIBS ( -- ) 11 1 DO I FIB . LOOP ;
+." FIB(1..10): " PRINT-FIBS CR
+
+." === 3. CREATE ... DOES> DEFINING WORDS (BBC FORTH STYLE!) ===" CR
+: SCALER ( k -- ) CREATE , DOES> @ * ;
+3 SCALER TRIPLE
+27 SCALER TRIAD-SHIFT
+." TRIPLE(14) = " 14 TRIPLE . ." | TRIAD-SHIFT(5) = " 5 TRIAD-SHIFT . CR
+
+: VECTOR ( n -- ) CREATE ALLOT DOES> + ;
+9 VECTOR TABLE9
+: FILL-T9 ( -- ) 9 0 DO I I * I TABLE9 ! LOOP ;
+: SHOW-T9 ( -- ) 9 0 DO I TABLE9 @ . LOOP ;
+FILL-T9
+." TABLE9[0..8]: " SHOW-T9 CR
+
+." === 4. NATIVE 3-WAY TRIT-IF & EAKER CASE ===" CR
+: CLASSIFY ( n -- )
+  SGN TRIT-IF
+    ." NEGATIVE(-1) "
+  WHEN0
+    ." UNDECIDED(0) "
+  WHEN+
+    ." POSITIVE(+1) "
+  TRIT-THEN ;
+
+." CLASSIFY(-7, 0, +42): " -7 CLASSIFY 0 CLASSIFY 42 CLASSIFY CR
+
+: TAG-NAME ( k -- )
+  CASE
+    -1 OF ." FALSE" ENDOF
+     0 OF ." UNDECIDED" ENDOF
+     1 OF ." TRUE" ENDOF
+    ." OTHER"
+  ENDCASE ;
+
+." KLEENE(KTRUE KAND KUNDECIDED) = " KTRUE KUNDECIDED KAND TAG-NAME CR
+." KLEENE(KFALSE KOR KTRUE)      = " KFALSE KTRUE KOR TAG-NAME CR
+
+." === 5. HARDWARE CYCLE TELEMETRY ===" CR
+." Total UE-1000 C-Complex cycles: " CYCLES . CR

@@ -1,0 +1,68 @@
+* === BYURAKAN SEPTEMBER 1971 CETI SELF-DESCRIBING TRIT-STREAM DECODER ===
+* Reads a balanced-ternary interstellar transmission from the card deck ($END),
+* parses the self-describing Markov rewriting grammar embedded in the frame,
+* runs the alien rewrite system on the payload seed, and grades the decoded
+* beacon structure with Duwamish-I's hardware Good-Wald detector (<Wald>)!
+
+$ENTRY Go {
+  = <Prout '=== BYURAKAN 1971 CETI SELF-DESCRIBING GRAMMAR DECODER ==='>
+    <ProcessDeck <ReadAll>>;
+}
+
+ReadAll {
+  = <ReadLoop <Card>>;
+}
+
+ReadLoop {
+  0 = ;
+  e.Line = (e.Line) <ReadLoop <Card>>;
+}
+
+ProcessDeck {
+  ('FRAME:' e.Header) ('RULES:' e.Rules) ('SEED:' e.Seed) ('EVID_DB:' e.EvStr)
+    = <Prout 'Frame header : ' e.Header>
+      <Prout 'Grammar rules: ' e.Rules>
+      <Prout 'Initial seed : ' e.Seed>
+      <RunAndGrade (<ParseRules e.Rules>) (e.Seed) <Numb e.EvStr>>;
+}
+
+* Parse semicolon-separated `LHS->RHS` rules into `((e.L) (e.R))` pairs
+ParseRules {
+  e.L '->' e.R ';' e.Rest = ((e.L) (e.R)) <ParseRules e.Rest>;
+  e.L '->' e.R = ((e.L) (e.R));
+  = ;
+}
+
+RunAndGrade {
+  (e.RuleList) (e.Seed) s.EvTicks, <ApplyLoop (e.RuleList) e.Seed> : e.Decoded
+    = <Prout 'Decoded trits: ' e.Decoded>
+      <Prout 'Decoded value: ' <Untrits e.Decoded> ' (Hept=' <Hept <Untrits e.Decoded>> ')'>
+      <Prout 'Hardware Wald: ' <Wald s.EvTicks 1620>>;
+}
+
+* Markov normal algorithm: apply first matching rewrite rule until fixed point!
+ApplyLoop {
+  (e.Rules) e.Str, <TryRules (e.Rules) e.Str> : {
+    (Changed e.Next) = <ApplyLoop (e.Rules) e.Next>;
+    Fixed = e.Str;
+  };
+}
+
+TryRules {
+  () e.Str = Fixed;
+  (((e.L) (e.R)) e.Rest) e.Str, <ReplaceFirst (e.L) (e.R) e.Str> : {
+    (Hit e.Next) = (Changed e.Next);
+    Miss = <TryRules (e.Rest) e.Str>;
+  };
+}
+
+ReplaceFirst {
+  (e.L) (e.R) e.Pre e.L e.Post = (Hit e.Pre e.R e.Post);
+  (e.L) (e.R) e.Str = Miss;
+}
+
+$END
+FRAME:BYURAKAN-CETI-1971-TRIT-V1
+RULES:TT->10;T1->0T;00->1;1T->01
+SEED:TTT100
+EVID_DB:1944

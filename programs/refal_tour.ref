@@ -1,0 +1,89 @@
+* === REFAL-36 LANGUAGE TOUR ON DUWAMISH-I (UE-1000) ===
+* Based on Turchin & Serdobol'skii (Kibernetika 1969) & IPM Preprints 41-49 (1971)
+
+$ENTRY Go {
+  = <Prout '=== 1. PATTERNS, PALINDROMES & CYRILLIC OBB-729 ==='>
+    <Prout 'Reverse(SETUN-70): ' <Reverse 'SETUN-70'>>
+    <Prout 'Pal(RADAR)       : ' <Pal 'RADAR'>>
+    <Prout 'Pal(BYURAKAN)    : ' <Pal 'BYURAKAN'>>
+    <Prout 'Cyrillic echo    : ' <Reverse 'ЬНУТЕС'>>
+    <Prout '=== 2. BACKTRACKING WHERE-CONDITION SPLIT ==='>
+    <Prout 'Split(,abc,de)   : ' <Split ',abc,de'>>
+    <Prout '=== 3. SYMBOLIC DIFFERENTIATION (TURCHIN 1969) ==='>
+    <Prout 'd/dx(x^2 + 3*x + 5) = ' <Simp <Diff (x) ((x '*' x) '+' ((3 '*' x) '+' 5))>>>
+    <Prout '=== 4. THREE-WAY QUICKSORT (HARDWARE <Compare>) ==='>
+    <Prout 'Sorted: ' <Qsort 27 -9 0 81 -1 13 3 -27 9>>
+    <Prout '=== 5. BURIAL STORE (<Br>/<Cp>/<Dg>), <Mu> & TERNARY ==='>
+    <Br 'site' '=' 'OBB Level -9'>
+    <Prout 'Buried site : ' <Cp 'site'>>
+    <Prout 'Dug site    : ' <Dg 'site'>>
+    <Prout 'Mu(Reverse) : ' <Mu Reverse 'DUWAMISH'>>
+    <Prout 'Trits(42)   : ' <Trits 42> ' | Untrits(1TTT0) = ' <Untrits '1TTT0'>>
+    <Prout 'Hept(1973)  : ' <Hept 1973>>
+    <Prout 'Kleene(T,U) : AND=' <KleeneAnd True Undecided> ' OR=' <KleeneOr True Undecided> ' NOT(U)=' <KleeneNot Undecided>>
+    <Prout 'Wald(+22dB) : ' <Wald 1782 1620>>
+    <Prout 'Total steps : ' <Step>>;
+}
+
+Reverse {
+  t.1 e.2 = <Reverse e.2> t.1;
+  = ;
+}
+
+Pal {
+  = True;
+  s.1 = True;
+  s.1 e.2 s.1 = <Pal e.2>;
+  e.1 = False;
+}
+
+* Backtracking where-condition: finds first comma with non-empty prefix!
+Split {
+  e.1 ',' e.2, <Lenw e.1> : s.N e.3, <Compare s.N 0> : '+' = (e.1) (e.2);
+  e.1 = (e.1);
+}
+
+* Turchin & Serdobol'skii (1969): Symbolic Differentiation & Algebraic Simplification
+Diff {
+  (s.X) s.X = 1;
+  (s.X) s.C = 0;
+  (s.X) (e.U '+' e.V) = (<Diff (s.X) e.U> '+' <Diff (s.X) e.V>);
+  (s.X) (e.U '*' e.V) = ((<Diff (s.X) e.U> '*' e.V) '+' (e.U '*' <Diff (s.X) e.V>));
+}
+
+Simp {
+  (e.A '+' e.B) = <SimpAdd <Simp e.A> '+' <Simp e.B>>;
+  (e.A '*' e.B) = <SimpMul <Simp e.A> '*' <Simp e.B>>;
+  t.X = t.X;
+}
+
+SimpAdd {
+  0 '+' e.B = e.B;
+  e.A '+' 0 = e.A;
+  s.A '+' s.B, <Type s.A> : 'N' s.A, <Type s.B> : 'N' s.B = <Add s.A s.B>;
+  e.A '+' e.B = (e.A '+' e.B);
+}
+
+SimpMul {
+  0 '*' e.B = 0;
+  e.A '*' 0 = 0;
+  1 '*' e.B = e.B;
+  e.A '*' 1 = e.A;
+  s.A '*' s.B, <Type s.A> : 'N' s.A, <Type s.B> : 'N' s.B = <Mul s.A s.B>;
+  e.A '*' e.B = (e.A '*' e.B);
+}
+
+* Native 3-way Quicksort partitioning directly on hardware <Compare> (- / 0 / +)!
+Qsort {
+  = ;
+  s.P e.Rest = <Part (s.P) () () () e.Rest>;
+}
+
+Part {
+  (s.P) (e.Lo) (e.Eq) (e.Hi) = <Qsort e.Lo> s.P e.Eq <Qsort e.Hi>;
+  (s.P) (e.Lo) (e.Eq) (e.Hi) s.X e.Rest, <Compare s.X s.P> : {
+    '-' = <Part (s.P) (e.Lo s.X) (e.Eq) (e.Hi) e.Rest>;
+    '0' = <Part (s.P) (e.Lo) (e.Eq s.X) (e.Hi) e.Rest>;
+    '+' = <Part (s.P) (e.Lo) (e.Eq) (e.Hi s.X) e.Rest>;
+  };
+}
