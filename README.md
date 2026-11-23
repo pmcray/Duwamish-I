@@ -27,6 +27,9 @@ python3 -m ue1000 info
 python3 -m ue1000 vos programs/level9_ops.vos
 python3 -m ue1000 vos --repl --user BROOKS
 
+# Launch the Live Web Operations Gallery & Pask–Licklider OBB-729 Vector-CRT Console
+python3 -m ue1000 gallery --port 8089
+
 # Compile & run SAL-3 programs natively on the simulated UE-1000
 python3 -m ue1000 sal3 programs/wald_seti.sal3
 python3 -m ue1000 sal3 programs/vec_cliodynamics.sal3 --asm

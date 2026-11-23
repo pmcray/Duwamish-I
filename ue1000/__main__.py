@@ -71,7 +71,18 @@ def main(argv: list[str] | None = None) -> int:
     vo.add_argument("--repl", action="store_true", help="Start interactive V-OS Level -9 terminal")
     vo.add_argument("--user", default="BROOKS", help="Initial WEAR login principal (default: BROOKS)")
 
+    gl = sub.add_parser("gallery", help="Launch live Web VSM Operations Gallery & OBB-729 Vector-CRT server")
+    gl.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
+    gl.add_argument("--port", type=int, default=8089, help="Bind port (default: 8089)")
+    gl.add_argument("--user", default="BROOKS", help="Initial V-OS principal (default: BROOKS)")
+    gl.add_argument("--prewarm", action="store_true", help="Pre-run Cliodynamics & SETI scopes on startup")
+
     args = parser.parse_args(argv)
+    if args.cmd == "gallery":
+        from .gallery_server import serve_gallery
+
+        serve_gallery(host=args.host, port=args.port, user=args.user, prewarm=args.prewarm)
+        return 0
     if args.cmd == "vos":
         from .vos import run_vos_repl, run_vos_script
 
