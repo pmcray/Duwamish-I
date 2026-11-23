@@ -10,11 +10,11 @@
 - **Tier 1 (`C-Complex`):** 8 symmetric 36-trit hardwired vector–scalar CPUs (`30 ns` `UE-TECL`, concurrent multi-CPU scheduler), dual-parcel 18-trit / 36-trit ISA (including `VF18OP` 54-float packed vector ops, `2×DB18` decibans, full Ferrite Vault `RTI` trap-frame restore & watchdog `TRAP_TIMER`), exact unbiased `TF36` (`47.55-bit` mantissa) & `TF18`, Kleene three-valued logic, Good Deciban `DLSE`/`DWALD`, and 27-word Cray Instruction Stack.
 - **Tier 2 (`T-Fabric`):** 30 liquid-cooled tiles (`27` active + `3` hot spares), $6 \times 6 = 36$ `TBFP-9` MACs/tile (`40 ns`, **48.6 GOPS peak / 17.0 GOPS sustained**), all 6 TTD modes (`ELEM`, `TBFP-9`, `TBFP-3` 12-triads/word, **Q4 1971 Rosenblatt–Kelvanov Byurakan ECO** `TB1` 36-trits/word associative mode, Oliver–Good radix-3 & Good–Thomas PFA radix-6 FFTs), truly asynchronous `TEXEC`/`TWAIT` overlap & timeout, and native ternary ABFT checksums.
 - **Tier 3 (`Hierarchical Store & Tier 3b Channels`):** $3^{16} = 43{,}046{,}721$ `T36` words (`81` active + `9` spare `UE-TD2000` differential 2-cell banks, 81-bank crossbar contention model, `292.8 MB` equiv), $3^{11} = 177{,}147$-word non-volatile dual-core ferrite Executive vault, live MMIO apertures, and **8 autonomous `CHIO` DMA Data Channels** linking the 32-spindle Ternary Disc Array, 32 Nine-Track Ternary Tape drives (`READ_BACKWARD`), Jameson's Alexandrian Archival Silo (WEAR provenance enforcement), Channel 8 Oliver SETI Baseband Ring, and Level -8 Digitisation Chute.
-- **Tier 4 (`V-Complex`):** Stafford Beer out-of-band Algedonic Telemetry Bus and W. Ross Ashby `< 75 µs` hot-spare tile & bank cutover.
+- **Tier 4 (`V-Complex` & `V-OS` / `C-EXEC`):** Stafford Beer out-of-band Algedonic Telemetry Bus, W. Ross Ashby `< 75 µs` hot-spare tile & bank cutover, native Ferrite Vault **`C-EXEC`** bare-metal executive (preemptive multi-CPU `TRAP_TIMER` scheduling + hardware `BASE`/`LIMIT` isolation), and Tier 4 **`V-OS`** interactive OBB Level -9 console shell with WEAR capability security & Alexandrian Vault filesystem.
 
 ## Quick Start
 ```bash
-# Run the full test suite (hardware, ECC, ISA, workloads, and all 9 languages)
+# Run the full test suite (hardware, ECC, ISA, C-EXEC/V-OS, workloads, and all 9 languages)
 pytest
 
 # Optional: install editable for the `ue1000` console command
@@ -22,6 +22,10 @@ pip install -e ".[dev]"
 
 # Print locked Rev. 1.5 architecture summary
 python3 -m ue1000 info
+
+# Boot C-EXEC in Ferrite Core & run the V-OS Level -9 Supervisory Shell (or script)
+python3 -m ue1000 vos programs/level9_ops.vos
+python3 -m ue1000 vos --repl --user BROOKS
 
 # Compile & run SAL-3 programs natively on the simulated UE-1000
 python3 -m ue1000 sal3 programs/wald_seti.sal3
@@ -74,4 +78,4 @@ python3 -m ue1000 intercal programs/comefrom_1974.i3 --1974
 python3 -m ue1000 demo all
 ```
 
-See [docs/SAL3.md](docs/SAL3.md), [docs/TRITRAN70V.md](docs/TRITRAN70V.md), [docs/TRILISP36.md](docs/TRILISP36.md), [docs/CONVERSE.md](docs/CONVERSE.md), [docs/DYNAMOX.md](docs/DYNAMOX.md), [docs/APL36.md](docs/APL36.md), [docs/REFAL36.md](docs/REFAL36.md), [docs/FORTH3.md](docs/FORTH3.md), and [docs/TRI_INTERCAL.md](docs/TRI_INTERCAL.md) for the complete language reference manuals.
+See [docs/VOS_CEXEC.md](docs/VOS_CEXEC.md), [docs/SAL3.md](docs/SAL3.md), [docs/TRITRAN70V.md](docs/TRITRAN70V.md), [docs/TRILISP36.md](docs/TRILISP36.md), [docs/CONVERSE.md](docs/CONVERSE.md), [docs/DYNAMOX.md](docs/DYNAMOX.md), [docs/APL36.md](docs/APL36.md), [docs/REFAL36.md](docs/REFAL36.md), [docs/FORTH3.md](docs/FORTH3.md), and [docs/TRI_INTERCAL.md](docs/TRI_INTERCAL.md) for the complete system and language reference manuals.

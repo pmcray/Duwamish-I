@@ -66,7 +66,24 @@ def main(argv: list[str] | None = None) -> int:
     ic.add_argument("file", help="Path to .i3 source file")
     ic.add_argument("--1974", dest="allow_1974", action="store_true", help="Allow post-Dec-1973 Clark COME FROM")
 
+    vo = sub.add_parser("vos", help="Run a V-OS / C-EXEC Level -9 console script (.vos) or interactive shell")
+    vo.add_argument("file", nargs="?", help="Optional path to .vos script (omit or --repl for interactive shell)")
+    vo.add_argument("--repl", action="store_true", help="Start interactive V-OS Level -9 terminal")
+    vo.add_argument("--user", default="BROOKS", help="Initial WEAR login principal (default: BROOKS)")
+
     args = parser.parse_args(argv)
+    if args.cmd == "vos":
+        from .vos import run_vos_repl, run_vos_script
+
+        if args.repl or not args.file:
+            run_vos_repl(user=args.user)
+            return 0
+        src = Path(args.file).read_text(encoding="utf-8")
+        out, _ = run_vos_script(src, user=args.user)
+        print(f"=== V-OS Level -9 Session: {args.file} ===")
+        for ln in out:
+            print(ln)
+        return 0
     if args.cmd == "intercal":
         from .tri_intercal import run_tri_intercal
 

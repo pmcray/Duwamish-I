@@ -1,0 +1,43 @@
+# Duwamish-I (UE-1000) — OBB Unseen Level -9 V-OS / C-EXEC Operations Script
+# Demonstrates: Ferrite Vault C-EXEC IPL, WEAR compartment security, Tier 3b CHIO
+# (Disc, 9-Track Tape READ_BACKWARD, Alexandrian Silo, Level -8 Chute), multi-CPU
+# preemptive User jobs with hardware isolation, live Ashby tile cutover, and VSM audit.
+
+WHO
+CEXEC
+LS ALL
+
+# 1. Test WEAR Compartment Security: GUEST cannot read restricted SILO:WEAR_CHARTER.SEC
+LOGIN GUEST
+CAT SILO:OPEN_NOTES.TXT
+CAT SILO:WEAR_CHARTER.SEC
+
+# 2. Switch to University Librarian J. Ulysses Jameson (cleared for 1971 & 7777)
+LOGIN JAMESON
+CAT SILO:BYURAKAN_71.MEMO
+STAGE SILO:WEAR_CHARTER.SEC DISC:CHARTER_COPY.TXT
+CHUTE INGEST DISC:L8_SETUN70.TXT
+CAT DISC:L8_SETUN70.TXT
+
+# 3. Exercise 9-Track Ternary Tape (CHIO #2) including Setun/IBM 2401 READ_BACKWARD
+TAPE WRITE "OBB-LEVEL-9 ALEXANDRIAN CHECKPOINT 1973"
+TAPE READBACK
+TAPE REWIND
+TAPE READ
+
+# 4. Submit 3 isolated User-mode jobs to C-EXEC (2 valid + 1 rogue trying M[-1]!)
+LOGIN BROOKS
+SUBMIT SUM_20 "AADD A1, A0, #20 | ADD S1, S0, #0\nLP: A2S S2, A1 | ADD S1, S1, S2\nBCT A1, #LP | NOP\nSVC #2\nSVC #1" --quantum 6
+SUBMIT CLOCK_CHK "SVC #4\nSVC #2\nSVC #5\nSVC #2\nADD S1, S0, #42 | NOP\nSVC #1" --quantum 6
+SUBMIT ROGUE_JOB "LD S1, -1(A0)\nSVC #1" --quantum 6
+DISPATCH 2
+PS
+CEXEC
+
+# 5. Live Beer VSM / Ashby <75 us hot-spare cutover drill + alarm acknowledge
+FAULT TILE 7 BYURAKAN_DRILL
+TILES
+VSM
+ACK
+VSM
+AUDIT
