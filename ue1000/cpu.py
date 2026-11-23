@@ -11,8 +11,9 @@ Conforms strictly to Principles of Operation (Rev. 1.5), Chapter 4:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional
+from typing import TYPE_CHECKING, Callable, List, Optional
 
 from .isa import (
     DecodedInstruction,
@@ -38,6 +39,7 @@ from .memory import (
 from .ternary import (
     HALF_TRITS,
     POW3,
+    WMAX_36,
     WORD_TRITS,
     extract_field,
     get_trit,
@@ -74,6 +76,10 @@ from .tfloat import (
 )
 from .tfabric import TFabric, TFabricUnrecoverableFault
 
+if TYPE_CHECKING:
+    from .channels import IOChannelSubsystem
+    from .vcomplex import VComplex
+
 C_CLOCK_NS: int = 30
 C_VEC_LEN: int = 27
 ISTACK_WORDS: int = 27
@@ -108,15 +114,29 @@ class PSW:
     ov: int = 0          # sticky integer overflow flag
     ie: int = 1          # interrupt enable
     cpuid: int = 0
+    ov_trap: int = 0     # +1 = raise Trap 5 (OVF) on signed integer overflow
 
     def pack(self) -> int:
         return (
-            self.mode * POW3[10]
+            self.ov_trap * POW3[11]
+            + self.mode * POW3[10]
             + self.ft * POW3[9]
             + self.fu * POW3[8]
             + self.ov * POW3[7]
             + self.ie * POW3[6]
             + wrap(self.cpuid, 6)
+        )
+
+    @classmethod
+    def unpack(cls, word: int, default_cpuid: Optional[int] = None) -> "PSW":
+        return cls(
+            mode=extract_field(word, 10, 1, WORD_TRITS) or -1,
+            ft=extract_field(word, 9, 1, WORD_TRITS),
+            fu=extract_field(word, 8, 1, WORD_TRITS),
+            ov=extract_field(word, 7, 1, WORD_TRITS),
+            ie=extract_field(word, 6, 1, WORD_TRITS),
+            cpuid=default_cpuid if default_cpuid is not None else extract_field(word, 0, 6, WORD_TRITS),
+            ov_trap=extract_field(word, 11, 1, WORD_TRITS),
         )
 
 
@@ -128,10 +148,14 @@ class CComplexCPU:
         cpu_id: int,
         mem: TernaryMemory,
         tfabric: TFabric,
+        io_channels: Optional["IOChannelSubsystem"] = None,
+        vcomplex: Optional["VComplex"] = None,
     ) -> None:
         self.cpu_id = cpu_id
         self.mem = mem
         self.tfabric = tfabric
+        self.io_channels = io_channels
+        self.vcomplex = vcomplex if vcomplex is not None else tfabric.vcomplex
 
         self.s: List[int] = [0] * 9
         self.a: List[int] = [0] * 9
@@ -148,6 +172,10 @@ class CComplexCPU:
         self._istack_slots: dict[int, int] = {}
         self.istack_hits: int = 0
         self.istack_misses: int = 0
+
+        # Optional C-EXEC watchdog timer quantum (instruction words before TRAP_TIMER)
+        self.timer_quantum: Optional[int] = None
+        self._timer_counter: int = 0
 
         self.cycles: int = 0
         self.instructions: int = 0
@@ -235,6 +263,16 @@ class CComplexCPU:
             return
         pc_curr = self.pc
         try:
+            # Watchdog quantum expiry check on clean instruction boundary (User mode, IE=+1)
+            if (
+                not self._is_sup()
+                and self.psw.ie == 1
+                and self.timer_quantum is not None
+                and self._timer_counter >= self.timer_quantum
+            ):
+                self._timer_counter = 0
+                raise CPUTrap(TRAP_TIMER, pc_curr, "Watchdog quantum expired")
+
             raw_word = self._fetch_word(pc_curr)
             decoded = decode_word(raw_word)
             self.pc = pc_curr + 1  # default sequential next word
@@ -247,6 +285,16 @@ class CComplexCPU:
                 if self.halted or branched:
                     # Branch in Parcel A skips Parcel B and transfers to Parcel A of target word
                     break
+
+            if not self._is_sup() and self.timer_quantum is not None:
+                self._timer_counter += 1
+
+            # Advance any in-flight asynchronous T-Fabric or Tier 3b DMA completions
+            now_ns = self.cycles * C_CLOCK_NS
+            if self.tfabric._pending_jobs:
+                self.tfabric.advance_to_ns(now_ns)
+            if self.io_channels is not None and self.io_channels._pending:
+                self.io_channels.advance_to_ns(now_ns)
         except CPUTrap as trap:
             self._handle_trap(trap)
 
@@ -267,14 +315,29 @@ class CComplexCPU:
             if mn == "NOP":
                 self.cycles += 1
             elif mn == "ADD":
-                self._set_s(rd, self.s[rs1] + self.s[rs2] + imm)
+                raw_sum = self.s[rs1] + self.s[rs2] + imm
+                self._set_s(rd, raw_sum)
                 self.cycles += 1
+                if raw_sum < -WMAX_36 or raw_sum > WMAX_36:
+                    self.psw.ov = 1
+                    if self.psw.ov_trap == 1:
+                        raise CPUTrap(TRAP_OVF, pc_curr, "Signed integer overflow in ADD")
             elif mn == "SUB":
-                self._set_s(rd, self.s[rs1] - self.s[rs2] - imm)
+                raw_diff = self.s[rs1] - self.s[rs2] - imm
+                self._set_s(rd, raw_diff)
                 self.cycles += 1
+                if raw_diff < -WMAX_36 or raw_diff > WMAX_36:
+                    self.psw.ov = 1
+                    if self.psw.ov_trap == 1:
+                        raise CPUTrap(TRAP_OVF, pc_curr, "Signed integer overflow in SUB")
             elif mn == "MUL":
-                self._set_s(rd, self.s[rs1] * self.s[rs2])
+                raw_prod = self.s[rs1] * self.s[rs2]
+                self._set_s(rd, raw_prod)
                 self.cycles += 4
+                if raw_prod < -WMAX_36 or raw_prod > WMAX_36:
+                    self.psw.ov = 1
+                    if self.psw.ov_trap == 1:
+                        raise CPUTrap(TRAP_OVF, pc_curr, "Signed integer overflow in MUL")
             elif mn == "MULH":
                 prod = self.s[rs1] * self.s[rs2]
                 self._set_s(rd, shift_trits(prod, -WORD_TRITS, WORD_TRITS * 2))
@@ -459,10 +522,30 @@ class CComplexCPU:
                 self._set_s(rd, rh * POW3[18] + rl, set_c=False)
                 self.cycles += 3 if mn == "FAD18" else 4
             elif mn == "DADD":
-                self._set_s(rd, deciban_add(self.s[rs1], self.s[rs2]))
+                if imm == 1:
+                    # Packed 2xDB18 saturating deciban add (PoO §4.3B)
+                    h1 = extract_field(self.s[rs1], 18, 18, WORD_TRITS)
+                    l1 = extract_field(self.s[rs1], 0, 18, WORD_TRITS)
+                    h2 = extract_field(self.s[rs2], 18, 18, WORD_TRITS)
+                    l2 = extract_field(self.s[rs2], 0, 18, WORD_TRITS)
+                    rh = deciban_add(h1, h2, width=HALF_TRITS)
+                    rl = deciban_add(l1, l2, width=HALF_TRITS)
+                    self._set_s(rd, rh * POW3[18] + rl)
+                else:
+                    self._set_s(rd, deciban_add(self.s[rs1], self.s[rs2]))
                 self.cycles += 1
             elif mn == "DSUB":
-                self._set_s(rd, deciban_sub(self.s[rs1], self.s[rs2]))
+                if imm == 1:
+                    # Packed 2xDB18 saturating deciban sub (PoO §4.3B)
+                    h1 = extract_field(self.s[rs1], 18, 18, WORD_TRITS)
+                    l1 = extract_field(self.s[rs1], 0, 18, WORD_TRITS)
+                    h2 = extract_field(self.s[rs2], 18, 18, WORD_TRITS)
+                    l2 = extract_field(self.s[rs2], 0, 18, WORD_TRITS)
+                    rh = deciban_sub(h1, h2, width=HALF_TRITS)
+                    rl = deciban_sub(l1, l2, width=HALF_TRITS)
+                    self._set_s(rd, rh * POW3[18] + rl)
+                else:
+                    self._set_s(rd, deciban_sub(self.s[rs1], self.s[rs2]))
                 self.cycles += 1
             elif mn == "DLSE":
                 self._set_s(rd, deciban_lse(self.s[rs1], self.s[rs2]))
@@ -487,6 +570,29 @@ class CComplexCPU:
                         res = tfloat_fma(self.v[rd][i], a, b, TF36)[0]
                     self.v[rd][i] = res
                 self.cycles += (5 if mn in ("VMUL", "VFMA") else 4) + self.vl
+            elif mn == "VF18OP":
+                # Packed 2-way TF18 vector ops (54 floats/vector; PoO §4.3B):
+                # imm == 0: add, imm == +1: mul, imm == +2: fma (Vd = Vd + Vs1 * Vs2)
+                for i in range(self.vl):
+                    h1 = extract_field(self.v[rs1][i], 18, 18, WORD_TRITS)
+                    l1 = extract_field(self.v[rs1][i], 0, 18, WORD_TRITS)
+                    h2 = extract_field(self.v[rs2][i], 18, 18, WORD_TRITS)
+                    l2 = extract_field(self.v[rs2][i], 0, 18, WORD_TRITS)
+                    if imm == 0:
+                        rh, _, _ = tfloat_add(h1, h2, TF18)
+                        rl, _, _ = tfloat_add(l1, l2, TF18)
+                    elif imm == 1:
+                        rh, _, _ = tfloat_mul(h1, h2, TF18)
+                        rl, _, _ = tfloat_mul(l1, l2, TF18)
+                    elif imm == 2:
+                        hd = extract_field(self.v[rd][i], 18, 18, WORD_TRITS)
+                        ld = extract_field(self.v[rd][i], 0, 18, WORD_TRITS)
+                        rh, _, _ = tfloat_fma(hd, h1, h2, TF18)
+                        rl, _, _ = tfloat_fma(ld, l1, l2, TF18)
+                    else:
+                        raise CPUTrap(TRAP_ILLOP, imm, f"Illegal VF18OP mode {imm}")
+                    self.v[rd][i] = rh * POW3[18] + rl
+                self.cycles += 4 + self.vl
             elif mn == "VRED":
                 acc = self.v[rs1][0] if self.vl > 0 else 0
                 for i in range(1, self.vl):
@@ -571,32 +677,69 @@ class CComplexCPU:
             self.cycles += 1
         elif mn == "VLD":
             stride = self.a[rs1] if mode == MODE_VSTRIDE else 1
+            start_cyc = self.cycles
+            phys_addrs: List[int] = []
             for i in range(self.vl):
-                self.v[rd][i] = self._mem_read(wrap(ea + i * stride, HALF_TRITS))
-            # Streaming overlap across 81 interleaved banks: adjust cycles to realistic 8 + 2*VL
-            self.cycles -= max(0, (self.vl - 1) * 6)
+                a_i = wrap(ea + i * stride, HALF_TRITS)
+                self.v[rd][i] = self._mem_read(a_i)
+                phys_addrs.append(a_i if self._is_sup() else self.base + a_i)
+            self.cycles = start_cyc
+            if self.vl > 0:
+                burst_ns, _ = self.mem.schedule_vector_burst(phys_addrs, start_ns=start_cyc * C_CLOCK_NS)
+                self.cycles += max(1, int(math.ceil(burst_ns / C_CLOCK_NS)))
+            else:
+                self.cycles += 1
         elif mn == "VST":
             stride = self.a[rs1] if mode == MODE_VSTRIDE else 1
+            start_cyc = self.cycles
+            phys_addrs = []
             for i in range(self.vl):
-                self._mem_write(wrap(ea + i * stride, HALF_TRITS), self.v[rd][i])
-            self.cycles -= max(0, (self.vl - 1) * 6)
+                a_i = wrap(ea + i * stride, HALF_TRITS)
+                self._mem_write(a_i, self.v[rd][i])
+                phys_addrs.append(a_i if self._is_sup() else self.base + a_i)
+            self.cycles = start_cyc
+            if self.vl > 0:
+                burst_ns, _ = self.mem.schedule_vector_burst(phys_addrs, start_ns=start_cyc * C_CLOCK_NS)
+                self.cycles += max(1, int(math.ceil(burst_ns / C_CLOCK_NS)))
+            else:
+                self.cycles += 1
         elif mn == "VGTH":
+            start_cyc = self.cycles
+            phys_addrs = []
             for i in range(self.vl):
-                self.v[rd][i] = self._mem_read(wrap(ea + self.v[rs1][i], HALF_TRITS))
-            self.cycles -= max(0, (self.vl - 1) * 6)
+                a_i = wrap(ea + self.v[rs1][i], HALF_TRITS)
+                self.v[rd][i] = self._mem_read(a_i)
+                phys_addrs.append(a_i if self._is_sup() else self.base + a_i)
+            self.cycles = start_cyc
+            if self.vl > 0:
+                burst_ns, _ = self.mem.schedule_vector_burst(phys_addrs, start_ns=start_cyc * C_CLOCK_NS)
+                self.cycles += 2 + max(1, int(math.ceil(burst_ns / C_CLOCK_NS)))
+            else:
+                self.cycles += 2
         elif mn == "VSCT":
+            start_cyc = self.cycles
+            phys_addrs = []
             for i in range(self.vl):
-                self._mem_write(wrap(ea + self.v[rs1][i], HALF_TRITS), self.v[rd][i])
-            self.cycles -= max(0, (self.vl - 1) * 6)
+                a_i = wrap(ea + self.v[rs1][i], HALF_TRITS)
+                self._mem_write(a_i, self.v[rd][i])
+                phys_addrs.append(a_i if self._is_sup() else self.base + a_i)
+            self.cycles = start_cyc
+            if self.vl > 0:
+                burst_ns, _ = self.mem.schedule_vector_burst(phys_addrs, start_ns=start_cyc * C_CLOCK_NS)
+                self.cycles += 2 + max(1, int(math.ceil(burst_ns / C_CLOCK_NS)))
+            else:
+                self.cycles += 2
         elif mn == "JMP":
             self.pc = wrap(self._mem_read(ea), HALF_TRITS) if mode == MODE_INDIRECT else ea
             self.cycles += 2
             return True
         elif mn == "J3":
-            self.pc = ea + self.c
+            base_target = wrap(self._mem_read(ea), HALF_TRITS) if mode == MODE_INDIRECT else ea
+            self.pc = base_target + self.c
             self.cycles += 2
             return True
         elif mn == "CALL":
+            target = wrap(self._mem_read(ea), HALF_TRITS) if mode == MODE_INDIRECT else ea
             ret = pc_curr + 1
             if rd == 0:
                 sp = wrap(self.s[8] - 1, WORD_TRITS)
@@ -604,25 +747,50 @@ class CComplexCPU:
                 self._mem_write(sp, ret)
             else:
                 self._set_a(rd, ret)
-            self.pc = ea
+            self.pc = target
             self.cycles += 2
             return True
         elif mn == "TEXEC":
             ttd_addr = self.a[rs1]
             mask = self.s[rs2]  # S0 == 0 -> all 27 active tiles!
+            # Truly asynchronous launch: 4 cycles dispatch, overlapped with subsequent CPU ops!
+            self.tfabric.submit_ttd_async(
+                self.mem, ttd_addr, mask, launch_ns=self.cycles * C_CLOCK_NS
+            )
+            self.cycles += 4
+        elif mn == "TWAIT":
+            mask = self.s[rs2]  # S0 == 0 -> wait on all 27 active tiles; imm = optional cycle timeout
             try:
-                stats = self.tfabric.execute_ttd_from_memory(
-                    self.mem, ttd_addr, mask, timestamp_ns=self.cycles * C_CLOCK_NS
+                status, wait_cyc = self.tfabric.wait_for_tiles(
+                    mask,
+                    now_ns=self.cycles * C_CLOCK_NS,
+                    timeout_cycles=imm,
+                    cpu_clock_ns=C_CLOCK_NS,
                 )
             except TFabricUnrecoverableFault as exc:
-                raise CPUTrap(TRAP_TFAULT, ttd_addr, str(exc)) from exc
-            self.cycles += 4 + (stats.elapsed_ns // C_CLOCK_NS)
-        elif mn == "TWAIT":
-            # S0 == 0 -> wait on all 27 active tiles; status trit written to C
-            self.c = self.tfabric.last_status
-            self.cycles += 2
+                raise CPUTrap(TRAP_TFAULT, self.a[rs1], str(exc)) from exc
+            self.c = status
+            self.cycles += wait_cyc + 2
         elif mn == "TSTAT":
-            self._set_s(rd, self.tfabric.total_abft_checks)
+            sel = self.a[rs1]
+            if sel == 0:
+                val = self.tfabric.total_abft_checks
+            elif sel == 1:
+                zs = self.tfabric.total_zero_trit_savings
+                val = int(round((sum(zs) / len(zs)) * 10)) if zs else 0
+            elif sel == 2:
+                val = self.tfabric.busy_tiles_mask(self.cycles * C_CLOCK_NS)
+            elif sel == 3:
+                val = len(self.vcomplex.spare_tiles)
+            elif -27 <= sel <= -1:
+                lt = -sel - 1
+                phys = self.vcomplex.tile_lut[lt]
+                st = self.vcomplex.tiles[phys]
+                temp_mC = int(round((st.temp_C - 22.0) * 100))
+                val = temp_mC * POW3[18] + st.abft_checks
+            else:
+                val = self.tfabric.total_abft_checks
+            self._set_s(rd, val)
             self.cycles += 2
         elif mn == "SVC":
             self.svc_log.append(imm)
@@ -635,11 +803,41 @@ class CComplexCPU:
                 raise CPUTrap(TRAP_PRIV, pc_curr, "RTI in User mode")
             slot = -27 * self.cpu_id
             self.pc = self.mem.read(slot - 1, supervisor=True)[0]
-            self.psw.mode = 1
+            saved_psw = self.mem.read(slot - 2, supervisor=True)[0]
+            saved_cvl = self.mem.read(slot - 5, supervisor=True)[0]
+            self.psw = PSW.unpack(saved_psw, default_cpuid=self.cpu_id)
+            self.c = extract_field(saved_cvl, 6, 1, WORD_TRITS)
+            vl_restored = extract_field(saved_cvl, 0, 6, WORD_TRITS)
+            self.vl = max(0, min(C_VEC_LEN, vl_restored))
             self.cycles += 6
             return True
+        elif mn == "CHIO":
+            if not self._is_sup():
+                raise CPUTrap(TRAP_PRIV, pc_curr, "CHIO in User mode")
+            if self.io_channels is None:
+                raise CPUTrap(TRAP_ILLOP, ins.op, "No Tier 3b IOChannelSubsystem attached")
+            ccb_addr = self.a[rs1]
+            status, _words, _dur = self.io_channels.execute_chio(
+                channel=imm, ccb_addr=ccb_addr, mem=self.mem, now_ns=self.cycles * C_CLOCK_NS
+            )
+            self.c = sign_trit(status)
+            self.cycles += 4
         elif mn == "ALGD":
-            self._set_s(rd, self.cycles)
+            if imm == 0:
+                val = self.cycles
+            elif imm == 1:
+                val = self.vcomplex.algedonic_alarms
+            elif imm == 2:
+                val = len(self.vcomplex.cutovers)
+            elif imm == 3:
+                val = self.vcomplex.system_health_trit()
+            elif imm == 4:
+                val = self.vcomplex.acknowledge_alarms()
+            elif imm == 5:
+                val = self.vcomplex.packets[-1].pack_words()[0] if self.vcomplex.packets else 0
+            else:
+                val = self.cycles
+            self._set_s(rd, val)
             self.cycles += 2
         elif mn == "HLT":
             if not self._is_sup():

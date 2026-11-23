@@ -102,11 +102,78 @@ class VComplex:
         self.cutovers: List[CutoverEvent] = []
         self.gallery_lamps: List[str] = []
         self.algedonic_alarms: int = 0
+        self.unacked_alarms: int = 0
 
     def emit_telemetry(self, pkt: AlgedonicPacket) -> None:
         self.packets.append(pkt)
         if pkt.health_trit == -1:
             self.algedonic_alarms += 1
+            self.unacked_alarms += 1
+
+    def acknowledge_alarms(self) -> int:
+        """Acknowledge pending Algedonic alarms (ALGD #4); returns previous unacked count."""
+        prev = self.unacked_alarms
+        self.unacked_alarms = 0
+        return prev
+
+    def system_health_trit(self) -> int:
+        """Compute Beer VSM overall health trit: +1 NOMINAL, 0 WARNING, -1 PAIN/FAULT."""
+        if not self.spare_tiles or any(ev.kind == "SPARES_EXHAUSTED" for ev in self.cutovers):
+            return -1
+        if self.unacked_alarms > 0 or len(self.spare_tiles) < T_SPARE_TILES:
+            return 0
+        return 1
+
+    def record_provenance_denial(
+        self,
+        cartridge_id: int,
+        presented_tag: int,
+        required_tag: int,
+        timestamp_ns: int = 0,
+    ) -> None:
+        self.emit_telemetry(
+            AlgedonicPacket(
+                unit_id=300 + (cartridge_id % 100),
+                health_trit=-1,
+                fault_code=5,  # 5 = WEAR PROVENANCE_DENIED
+                temp_mC=0,
+                freon_dP=0,
+                sec_count=0,
+                erasure_count=0,
+                abft_checks=0,
+                abft_faults=0,
+                zero_trit_pct=0,
+                timestamp=timestamp_ns // 30,
+            )
+        )
+        self.gallery_lamps.append(
+            f"WEAR AUDIT: Alexandrian Silo Cart {cartridge_id} PROVENANCE DENIED "
+            f"(tag {presented_tag} != {required_tag})"
+        )
+
+    def record_ecc_event(
+        self,
+        physical_bank: int,
+        sec_count: int,
+        erasure_count: int,
+        is_uncorrectable: bool = False,
+        timestamp_ns: int = 0,
+    ) -> None:
+        self.emit_telemetry(
+            AlgedonicPacket(
+                unit_id=100 + physical_bank,
+                health_trit=-1 if is_uncorrectable else 0,
+                fault_code=4,  # 4 = MEM_ERASURE / ECC
+                temp_mC=0,
+                freon_dP=0,
+                sec_count=sec_count,
+                erasure_count=erasure_count,
+                abft_checks=0,
+                abft_faults=0,
+                zero_trit_pct=0,
+                timestamp=timestamp_ns // 30,
+            )
+        )
 
     def trigger_tile_cutover(
         self,

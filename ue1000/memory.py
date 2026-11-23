@@ -16,10 +16,13 @@ Conforms strictly to Principles of Operation (Rev. 1.5), Chapter 3:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from .ecc import ECCDecodeResult, decode_word_42, encode_word_42
 from .ternary import WORD_TRITS, wrap
+
+if TYPE_CHECKING:
+    from .vcomplex import VComplex
 
 FERRITE_WORDS: int = 3**11              # 177,147
 FERRITE_MIN_ADDR: int = -FERRITE_WORDS  # -177,147
@@ -64,13 +67,20 @@ class BankHealth:
 class TernaryMemory:
     """Cycle-approximate, ECC-verified 18-trit physical store for the UE-1000."""
 
-    def __init__(self, strict_ecc: bool = False) -> None:
+    def __init__(
+        self,
+        strict_ecc: bool = False,
+        vcomplex: Optional["VComplex"] = None,
+        auto_cutover_erasure_threshold: Optional[int] = None,
+    ) -> None:
         # Fast sparse data map: addr -> T36 int (for clean untouched words)
         self._words: Dict[int, int] = {}
         # Full 42-trit ECC storage for words with active faults or when strict_ecc=True
         self._ecc_words: Dict[int, List[int]] = {}
         self._erasures: Dict[int, Set[int]] = {}
         self.strict_ecc: bool = strict_ecc
+        self.vcomplex: Optional["VComplex"] = vcomplex
+        self.auto_cutover_erasure_threshold: Optional[int] = auto_cutover_erasure_threshold
 
         # 81 logical banks -> 90 physical banks (0..80 active, 81..89 hot spares)
         self.bank_lut: List[int] = list(range(TDRAM_BANKS_ACTIVE))
@@ -78,7 +88,13 @@ class TernaryMemory:
         self.bank_health: Dict[int, BankHealth] = {
             b: BankHealth(physical_bank=b) for b in range(TDRAM_BANKS_TOTAL)
         }
+        # 81-bank crossbar bank-busy horizon (indexed by physical bank 0..89, in ns)
+        self.bank_busy_until_ns: List[int] = [0] * TDRAM_BANKS_TOTAL
+        self.crossbar_conflicts: int = 0
+
         self.mmio: Dict[int, int] = {}
+        self.mmio_read_handler: Optional[Callable[[int], Optional[int]]] = None
+        self.mmio_write_handler: Optional[Callable[[int, int], bool]] = None
 
         # Telemetry counters
         self.reads: int = 0
@@ -86,6 +102,7 @@ class TernaryMemory:
         self.ferrite_accesses: int = 0
         self.bank_cutovers: int = 0
         self.last_ecc_result: Optional[ECCDecodeResult] = None
+        self._scrubbing: bool = False
 
     def classify_address(self, addr: int) -> str:
         if addr == 0:
@@ -147,13 +164,18 @@ class TernaryMemory:
         if region == "ZERO_GUARD":
             return 0, TDRAM_CYCLE_NS
         if region == "MMIO":
+            if self.mmio_read_handler is not None:
+                live = self.mmio_read_handler(phys)
+                if live is not None:
+                    return wrap(live, WORD_TRITS), TDRAM_CYCLE_NS
             return self.mmio.get(phys, 0), TDRAM_CYCLE_NS
         if region == "FERRITE":
             self.ferrite_accesses += 1
             return self._words.get(phys, 0), FERRITE_CYCLE_NS
 
         # T-DRAM read with [42, 36, 4]_3 ECC + erasure checking
-        pbank = self.physical_bank(phys)
+        lbank = self.logical_bank(phys)
+        pbank = self.bank_lut[lbank]
         bh = self.bank_health[pbank]
 
         if phys in self._ecc_words or phys in self._erasures:
@@ -165,12 +187,25 @@ class TernaryMemory:
             self.last_ecc_result = res
             if res.status == "SEC_CORRECTED":
                 bh.sec_count += 1
+                if self.vcomplex is not None and not self._scrubbing:
+                    self.vcomplex.record_ecc_event(pbank, bh.sec_count, bh.erasure_count, False)
                 return res.data_word, TDRAM_CYCLE_NS
             if res.status == "ERASURE_CORRECTED":
                 bh.erasure_count += res.erasure_count
+                if self.vcomplex is not None and not self._scrubbing:
+                    self.vcomplex.record_ecc_event(pbank, bh.sec_count, bh.erasure_count, False)
+                if (
+                    not self._scrubbing
+                    and self.auto_cutover_erasure_threshold is not None
+                    and bh.erasure_count >= self.auto_cutover_erasure_threshold
+                    and self.spare_banks
+                ):
+                    self.scrub_and_cutover_bank(lbank)
                 return res.data_word, TDRAM_CYCLE_NS
             if res.status == "UNCORRECTABLE_DED":
                 bh.ded_count += 1
+                if self.vcomplex is not None and not self._scrubbing:
+                    self.vcomplex.record_ecc_event(pbank, bh.sec_count, bh.erasure_count, True)
                 raise MemoryDEDError(
                     f"MEMDED at phys={phys} (bank {pbank}): erasures={res.erasure_count}, syn={res.syndrome}"
                 )
@@ -192,6 +227,8 @@ class TernaryMemory:
         val = wrap(value, WORD_TRITS)
 
         if region == "MMIO":
+            if self.mmio_write_handler is not None and self.mmio_write_handler(phys, val):
+                return TDRAM_CYCLE_NS
             self.mmio[phys] = val
             return TDRAM_CYCLE_NS
         if region == "FERRITE":
@@ -204,6 +241,53 @@ class TernaryMemory:
             self._ecc_words[phys] = encode_word_42(val)
         self._erasures.pop(phys, None)
         return TDRAM_CYCLE_NS
+
+    def schedule_vector_burst(
+        self,
+        phys_addrs: Sequence[int],
+        start_ns: int,
+    ) -> Tuple[int, int]:
+        """Model 81-bank crossbar pipelined burst timing (60 ns issue / 240 ns bank cycle).
+
+        Per PoO §3.2: strided accesses with stride coprime to 3 hit distinct banks mod 81
+        with zero conflicts (60 ns/word); strides sharing factors of 3 collide on busy banks.
+        Returns (total_duration_ns, conflicts_in_burst).
+        """
+        if not phys_addrs:
+            return TDRAM_CYCLE_NS, 0
+        bus_cursor = start_ns
+        max_finish = start_ns
+        conflicts = 0
+        for addr in phys_addrs:
+            region = self.classify_address(addr)
+            if region == "FERRITE":
+                t_issue = bus_cursor
+                finish = t_issue + FERRITE_CYCLE_NS
+                bus_cursor = finish
+                if finish > max_finish:
+                    max_finish = finish
+                continue
+            if region not in ("SUP_TDRAM", "USER_TDRAM"):
+                t_issue = bus_cursor
+                finish = t_issue + TDRAM_CYCLE_NS
+                bus_cursor = t_issue + TDRAM_BURST_NS
+                if finish > max_finish:
+                    max_finish = finish
+                continue
+            pbank = self.physical_bank(addr)
+            busy_until = self.bank_busy_until_ns[pbank]
+            if busy_until > bus_cursor:
+                conflicts += 1
+                self.crossbar_conflicts += 1
+                t_issue = busy_until
+            else:
+                t_issue = bus_cursor
+            finish = t_issue + TDRAM_CYCLE_NS
+            self.bank_busy_until_ns[pbank] = finish
+            bus_cursor = t_issue + TDRAM_BURST_NS
+            if finish > max_finish:
+                max_finish = finish
+        return max_finish - start_ns, conflicts
 
     # ------------------------------------------------------------------
     # Fault Injection & Ashby Hot-Spare Bank Scrub-Cutover
@@ -235,14 +319,20 @@ class TernaryMemory:
         scrubbed = 0
         # Re-encode every resident word belonging to logical_bank through ECC onto clean new_phys
         addrs = [a for a in set(self._words) | set(self._ecc_words) if self.classify_address(a) in ("SUP_TDRAM", "USER_TDRAM") and self.logical_bank(a) == logical_bank]
-        for a in addrs:
-            val, _ = self.read(a, supervisor=True)
-            self._words[a] = val
-            self._ecc_words[a] = encode_word_42(val)
-            self._erasures.pop(a, None)
-            scrubbed += 1
+        self._scrubbing = True
+        try:
+            for a in addrs:
+                val, _ = self.read(a, supervisor=True)
+                self._words[a] = val
+                self._ecc_words[a] = encode_word_42(val)
+                self._erasures.pop(a, None)
+                scrubbed += 1
+        finally:
+            self._scrubbing = False
 
         self.bank_health[old_phys].retired = True
         self.bank_lut[logical_bank] = new_phys
         self.bank_cutovers += 1
+        if self.vcomplex is not None:
+            self.vcomplex.record_bank_cutover(logical_bank, old_phys, new_phys, scrubbed)
         return old_phys, new_phys, scrubbed

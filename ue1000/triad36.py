@@ -361,6 +361,8 @@ def _assemble_long_word(text: str, symbols: Dict[str, int]) -> int:
         pass
     elif mn == "CHIO":
         rs1 = _parse_reg(ops[0])
+        if rs1 is None:
+            raise AssemblyError(f"CHIO expects Address register As1, #ch: {text}")
         imm = _eval_expr(ops[1], symbols)
     elif mn == "ALGD":
         rd = _parse_reg(ops[0])
@@ -405,7 +407,7 @@ def assemble(source: str, origin: int = 100) -> AssembledProgram:
             parts = line.split(None, 1)[1].split(",", 1)
             symbols[parts[0].strip()] = _eval_expr(parts[1], symbols)
             continue
-        if upper.startswith(".WORD") or upper.startswith(".DATA") or upper.startswith(".TTD"):
+        if upper.startswith(".WORD") or upper.startswith(".DATA") or upper.startswith(".TTD") or upper.startswith(".CCB"):
             vals = _split_operands(line.split(None, 1)[1])
             for v_str in vals:
                 parsed_items.append((pc, "DATA", v_str))

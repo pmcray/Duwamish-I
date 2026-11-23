@@ -501,6 +501,36 @@ def unpack_word_to_nonets(w: int) -> Tuple[int, int, int, int]:
     )
 
 
+def pack_triads_to_word(triads: Tuple[int, ...] | list[int]) -> int:
+    """Pack up to 12 x 3-trit triads (TBFP-3 elements, ±13) into one T36 word (MSB first)."""
+    w = 0
+    n = min(12, len(triads))
+    for i in range(n):
+        w += wrap(int(triads[i]), 3) * POW3[33 - 3 * i]
+    return w
+
+
+def unpack_word_to_triads(w: int) -> Tuple[int, ...]:
+    """Unpack one T36 word into 12 x 3-trit triads (MSB first)."""
+    return tuple(extract_field(w, 33 - 3 * i, 3, WORD_TRITS) for i in range(12))
+
+
+def pack_trits_to_word(trits: Tuple[int, ...] | list[int]) -> int:
+    """Pack up to 36 pure trits (-1/0/+1, TB1 weights) into one T36 word (trit 35..0 MSB first)."""
+    w = 0
+    n = min(WORD_TRITS, len(trits))
+    for i in range(n):
+        t = int(trits[i])
+        t = 1 if t > 0 else (-1 if t < 0 else 0)
+        w += t * POW3[35 - i]
+    return w
+
+
+def unpack_word_to_trits(w: int) -> Tuple[int, ...]:
+    """Unpack one T36 word into 36 pure trits (trit 35..0 MSB first)."""
+    return tuple(extract_field(w, 35 - i, 1, WORD_TRITS) for i in range(WORD_TRITS))
+
+
 # ---------------------------------------------------------------------------
 # Good Deciban Fixed-Point ALU (DB18 / DB36, 81 ticks/dB, 243-entry ROM)
 # ---------------------------------------------------------------------------
